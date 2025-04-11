@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Solar System 3D Simulation (Three.js)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #101018;
+      overflow: hidden;
+      font-family: 'Segoe UI', Arial, sans-serif;
+    }
+    body {
+      width: 100vw;
+      height: 100vh;
+    }
+    #main-canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      z-index: 0;
+    }
+    #info {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #fff;
+      background: rgba(0,0,0,0.5);
+      padding: 8px 24px;
+      border-radius: 8px;
+      font-size: 1.1em;
+      text-align: center;
+      z-index: 10;
+      pointer-events: none;
+      user-select: none;
+      letter-spacing: 0.5px;
+    }
+    #control-panel {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(20, 20, 32, 0.92);
+      color: #eee;
+      padding: 18px 22px 14px 22px;
+      border-radius: 12px;
+      box-shadow: 0 2px 16px 0 #000a;
+      z-index: 20;
+      min-width: 260px;
+      font-size: 1em;
+      user-select: none;
+    }
+    #control-panel label {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 1em;
+      gap: 8px;
+    }
+    #control-panel input[type="range"] {
+      flex: 1;
+      margin: 0 8px;
+      accent-color: #ffb300;
+    }
+    #control-panel input[type="checkbox"] {
+      accent-color: #ffb300;
+      margin-right: 6px;
+    }
+    #control-panel .slider-value {
+      min-width: 38px;
+      display: inline-block;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #ffd700;
+      font-size: 0.98em;
+    }
+    #control-panel hr {
+      border: none;
+      border-top: 1px solid #333;
+      margin: 10px 0 12px 0;
+    }
+    .label {
+      color: #fff;
+      font-size: 1em;
+      font-weight: 600;
+      text-shadow: 0 0 6px #000, 0 0 2px #000;
+      background: rgba(0,0,0,0.35);
+      padding: 2px 8px;
+      border-radius: 6px;
+      pointer-events: none;
+      white-space: nowrap;
+      letter-spacing: 0.5px;
+      border: 1px solid #fff2;
+      margin-top: 8px;
+    }
+    @media (max-width: 600px) {
+      #control-panel {
+        min-width: 0;
+        width: 90vw;
+        left: 5vw;
+        font-size: 0.95em;
+        padding: 10px 8px 8px 8px;
+      }
+      #info {
+        font-size: 0.95em;
+        padding: 6px 8px;
+      }
+      .label {
+        font-size: 0.9em;
+        padding: 1px 4px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <b>Solar System 3D Simulation</b> &mdash; Drag to rotate, scroll to zoom. Adjust controls at top-left.
+  </div>
+  <div id="control-panel">
+    <label>
+      Sun Wireframe Brightness
+      <input id="sun-wire-brightness" type="range" min="0" max="5" step="0.01" value="1.5">
+      <span class="slider-value" id="sun-wire-brightness-value">1.50</span>
+    </label>
+    <label>
+      Animation Speed
+      <input id="anim-speed" type="range" min="0.01" max="5" step="0.01" value="1">
+      <span class="slider-value" id="anim-speed-value">1.00</span>
+    </label>
+    <label>
+      Planet Brightness
+      <input id="planet-brightness" type="range" min="0.1" max="5" step="0.01" value="1.2">
+      <span class="slider-value" id="planet-brightness-value">1.20</span>
+    </label>
+    <hr>
+    <label>
+      <input id="show-orbits" type="checkbox" checked>
+      Show Orbits
+    </label>
+    <label>
+      <input id="show-labels" type="checkbox" checked>
+      Show Labels
+    </label>
+    <label>
+      <input id="show-gravity" type="checkbox" checked>
+      Show Gravity Spheres
+    </label>
+    <label>
+      <input id="show-earth-mars" type="checkbox" checked>
+      Show Earth-Mars Line
+    </label>
+  </div>
+  <canvas id="main-canvas"></canvas>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+    // --- Constants and Data ---
+    const AU = 1.496e8; // km
+    const PLANET_SCALE = 0.025; // scale factor for planet radii
+    const ORBIT_SCALE = 18; // scale factor for AU to scene units
+    const SUN_RADIUS = 696340; // km
+    const SUN_SCALE = 0.09; // scale factor for Sun radius
+    const GRAVITY_BASE_RADIUS = 1.5; // base radius for gravity spheres
+    const GRAVITY_SCALE = 2.2; // scale factor for log10(mass+1)
+    const STARFIELD_RADIUS = 200;
+    const STAR_COUNT = 1800;
+
+    // Planet data: name, distance (AU), period (days), eccentricity, inclination (deg), diameter (km), color, mass (Earth=1)
+    const PLANETS = [
+      {
+        name: 'Mercury', distance: 0.387, period: 87.97, e: 0.2056, i: 7.00, diameter: 4879, color: '#b1b1b1', mass: 0.055,
+      },
+      {
+        name: 'Venus', distance: 0.723, period: 224.70, e: 0.0067, i: 3.39, diameter: 12104, color: '#e6c07b', mass: 0.815,
+      },
+      {
+        name: 'Earth', distance: 1.000, period: 365.26, e: 0.0167, i: 0.00, diameter: 12756, color: '#3a7bd5', mass: 1.0,
+      },
+      {
+        name: 'Mars', distance: 1.524, period: 686.98, e: 0.0934, i: 1.85, diameter: 6792, color: '#c1440e', mass: 0.107,
+      },
+      {
+        name: 'Jupiter', distance: 5.203, period: 4332.59, e: 0.0489, i: 1.31, diameter: 142984, color: '#e3c07b', mass: 317.8,
+      },
+      {
+        name: 'Saturn', distance: 9.537, period: 10759.22, e: 0.0565, i: 2.49, diameter: 120536, color: '#e8d8a8', mass: 95.2,
+      },
+      {
+        name: 'Uranus', distance: 19.191, period: 30685.4, e: 0.0464, i: 0.77, diameter: 51118, color: '#7de2fc', mass: 14.5,
+      },
+      {
+        name: 'Neptune', distance: 30.07, period: 60190.03, e: 0.0095, i: 1.77, diameter: 49528, color: '#4062bb', mass: 17.1,
+      },
+      {
+        name: 'Pluto', distance: 39.48, period: 90560, e: 0.2488, i: 17.16, diameter: 2376, color: '#bca18d', mass: 0.0022,
+      }
+    ];
+
+    // --- Scene Setup ---
+    const canvas = document.getElementById('main-canvas');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x101018);
+
+    // Camera
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+    camera.position.set(0, 60, 180);
+
+    // Renderers
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    labelRenderer.domElement.style.position = 'absolute';
+    labelRenderer.domElement.style.top = '0';
+    labelRenderer.domElement.style.pointerEvents = 'none';
+    labelRenderer.domElement.style.zIndex = '5';
+    document.body.appendChild(labelRenderer.domElement);
+
+    // Controls
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.minDistance = 20;
+    controls.maxDistance = 800;
+    controls.enablePan = false;
+    controls.target.set(0, 0, 0);
+
+    // Lighting
+    const sunLight = new THREE.PointLight(0xfff6b0, 2.2, 0, 2);
+    sunLight.position.set(0, 0, 0);
+    scene.add(sunLight);
+
+    // --- Starfield ---
+    function createStarfield() {
+      const geometry = new THREE.BufferGeometry();
+      const positions = [];
+      for (let i = 0; i < STAR_COUNT; i++) {
+        // Spherical distribution
+        const theta = Math.acos(2 * Math.random() - 1);
+        const phi = 2 * Math.PI * Math.random();
+        const r = STARFIELD_RADIUS * (0.85 + 0.15 * Math.random());
+        positions.push(
+          r * Math.sin(theta) * Math.cos(phi),
+          r * Math.sin(theta) * Math.sin(phi),
+          r * Math.cos(theta)
+        );
+      }
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const material = new THREE.PointsMaterial({ color: 0xffffff, size: 0.7, sizeAttenuation: true });
+      const points = new THREE.Points(geometry, material);
+      scene.add(points);
+    }
+    createStarfield();
+
+    // --- Sun ---
+    const sunGroup = new THREE.Group();
+    // Sun main sphere
+    const sunTexture = new THREE.TextureLoader().load('https://placehold.co/256x256/ffb300/fff?text=Sun');
+    const sunMat = new THREE.MeshStandardMaterial({
+      emissive: new THREE.Color(0xffb300),
+      emissiveIntensity: 1.5,
+      color: 0x222211,
+      map: sunTexture,
+      metalness: 0.2,
+      roughness: 0.6
+    });
+    const sunGeo = new THREE.SphereGeometry(SUN_RADIUS * SUN_SCALE / 10000, 64, 32);
+    const sunMesh = new THREE.Mesh(sunGeo, sunMat);
+    sunMesh.castShadow = false;
+    sunMesh.receiveShadow = false;
+    sunGroup.add(sunMesh);
+
+    // Sun wireframe overlay
+    const sunWireGeo = new THREE.SphereGeometry(SUN_RADIUS * SUN_SCALE / 10000 * 1.04, 32, 16);
+    const sunWireMat = new THREE.MeshBasicMaterial({
+      color: 0xffe066,
+      wireframe: true,
+      transparent: true,
+      opacity: 1.5 // initial value, will be clamped to [0,1] below
+    });
+    const sunWire = new THREE.Mesh(sunWireGeo, sunWireMat);
+    sunGroup.add(sunWire);
+
+    scene.add(sunGroup);
+
+    // --- Planets, Orbits, Gravity Spheres, Labels ---
+    const planetObjects = [];
+    const orbitLines = [];
+    const gravitySpheres = [];
+    const planetLabels = [];
+    const planetData = [];
+
+    // For Earth-Mars line
+    let earthIdx = PLANETS.findIndex(p => p.name === 'Earth');
+    let marsIdx = PLANETS.findIndex(p => p.name === 'Mars');
+    let earthObj, marsObj;
+
+    // Helper: create orbit ellipse points in 3D
+    function createOrbitEllipse(a, e, iDeg, segments = 256) {
+      const points = [];
+      const b = a * Math.sqrt(1 - e * e);
+      const iRad = THREE.MathUtils.degToRad(iDeg);
+      for (let t = 0; t <= segments; t++) {
+        const theta = 2 * Math.PI * t / segments;
+        // Ellipse in x-y, then rotate for inclination
+        let x = a * Math.cos(theta) - a * e; // focus at Sun
+        let y = b * Math.sin(theta);
+        let z = 0;
+        // Inclination: rotate around x axis
+        let y1 = y * Math.cos(iRad) - z * Math.sin(iRad);
+        let z1 = y * Math.sin(iRad) + z * Math.cos(iRad);
+        points.push(new THREE.Vector3(x, y1, z1));
+      }
+      return points;
+    }
+
+    // Helper: solve Kepler's equation (approximate, Newton-Raphson)
+    function solveKepler(M, e, tol = 1e-6) {
+      let E = M;
+      for (let i = 0; i < 8; i++) {
+        let dE = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+        E -= dE;
+        if (Math.abs(dE) < tol) break;
+      }
+      return E;
+    }
+
+    // Helper: get planet position at time t (in days)
+    function getPlanetPosition(planet, t) {
+      // Mean anomaly
+      const n = 2 * Math.PI / planet.period; // rad/day
+      const M = n * t;
+      // Eccentric anomaly
+      const E = solveKepler(M, planet.e);
+      // True anomaly
+      const v = 2 * Math.atan2(
+        Math.sqrt(1 + planet.e) * Math.sin(E / 2),
+        Math.sqrt(1 - planet.e) * Math.cos(E / 2)
+      );
+      // Distance from Sun (focus)
+      const a = planet.distance * ORBIT_SCALE;
+      const r = a * (1 - planet.e * planet.e) / (1 + planet.e * Math.cos(v));
+      // Position in orbital plane
+      let x = r * Math.cos(v) - a * planet.e;
+      let y = r * Math.sin(v);
+      let z = 0;
+      // Inclination: rotate around x axis
+      const iRad = THREE.MathUtils.degToRad(planet.i);
+      let y1 = y * Math.cos(iRad) - z * Math.sin(iRad);
+      let z1 = y * Math.sin(iRad) + z * Math.cos(iRad);
+      return new THREE.Vector3(x, y1, z1);
+    }
+
+    // Create planets, orbits, gravity spheres, labels
+    PLANETS.forEach((planet, idx) => {
+      // Planet mesh
+      const radius = (planet.diameter / 2) * PLANET_SCALE / 1000 + 0.5;
+      const mat = new THREE.MeshStandardMaterial({
+        color: planet.color,
+        emissive: new THREE.Color(planet.color),
+        emissiveIntensity: 1.2,
+        metalness: 0.3,
+        roughness: 0.6
+      });
+      const geo = new THREE.SphereGeometry(radius, 32, 16);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      scene.add(mesh);
+
+      // Saturn's rings
+      if (planet.name === 'Saturn') {
+        const ringInner = radius * 1.4;
+        const ringOuter = radius * 2.2;
+        const ringGeo = new THREE.RingGeometry(ringInner, ringOuter, 64);
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: 0xe8d8a8,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.45
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.rotation.x = Math.PI / 2 - THREE.MathUtils.degToRad(planet.i);
+        mesh.add(ring);
+      }
+
+      // Orbit line
+      const orbitPts = createOrbitEllipse(planet.distance * ORBIT_SCALE, planet.e, planet.i, 256);
+      const orbitGeo = new THREE.BufferGeometry().setFromPoints(orbitPts);
+      const orbitMat = new THREE.LineDashedMaterial({
+        color: 0xffffff,
+        dashSize: 1.2,
+        gapSize: 0.7,
+        opacity: 0.7,
+        transparent: true
+      });
+      const orbitLine = new THREE.Line(orbitGeo, orbitMat);
+      orbitLine.computeLineDistances();
+      scene.add(orbitLine);
+
+      // Gravity sphere
+      const gravRadius = GRAVITY_BASE_RADIUS + Math.log10(planet.mass + 1) * GRAVITY_SCALE;
+      const gravGeo = new THREE.SphereGeometry(gravRadius, 24, 16);
+      const gravMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.32
+      });
+      const gravMesh = new THREE.Mesh(gravGeo, gravMat);
+      scene.add(gravMesh);
+
+      // Label
+      const labelDiv = document.createElement('div');
+      labelDiv.className = 'label';
+      labelDiv.textContent = planet.name;
+      const labelObj = new CSS2DObject(labelDiv);
+      scene.add(labelObj);
+
+      // Store
+      planetObjects.push(mesh);
+      orbitLines.push(orbitLine);
+      gravitySpheres.push(gravMesh);
+      planetLabels.push(labelObj);
+      planetData.push({
+        ...planet,
+        radius,
+        gravRadius,
+        mesh,
+        orbitLine,
+        gravMesh,
+        labelObj
+      });
+
+      if (planet.name === 'Earth') earthObj = mesh;
+      if (planet.name === 'Mars') marsObj = mesh;
+    });
+
+    // --- Earth-Mars Line ---
+    const earthMarsLineMat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 });
+    const earthMarsLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    const earthMarsLine = new THREE.Line(earthMarsLineGeo, earthMarsLineMat);
+    scene.add(earthMarsLine);
+
+    // --- Post-processing (Bloom) ---
+    const composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.7, 0.8, 0.01);
+    const outputPass = new OutputPass();
+    composer.addPass(renderPass);
+    composer.addPass(bloomPass);
+    composer.addPass(outputPass);
+
+    // --- UI Controls ---
+    const sunWireSlider = document.getElementById('sun-wire-brightness');
+    const sunWireValue = document.getElementById('sun-wire-brightness-value');
+    const animSpeedSlider = document.getElementById('anim-speed');
+    const animSpeedValue = document.getElementById('anim-speed-value');
+    const planetBrightSlider = document.getElementById('planet-brightness');
+    const planetBrightValue = document.getElementById('planet-brightness-value');
+    const showOrbitsBox = document.getElementById('show-orbits');
+    const showLabelsBox = document.getElementById('show-labels');
+    const showGravityBox = document.getElementById('show-gravity');
+    const showEarthMarsBox = document.getElementById('show-earth-mars');
+
+    function updateSliderValue(slider, valueElem, digits = 2) {
+      valueElem.textContent = Number(slider.value).toFixed(digits);
+    }
+    sunWireSlider.addEventListener('input', () => {
+      // Control wireframe opacity (clamped to [0,1])
+      let val = parseFloat(sunWireSlider.value);
+      sunWireMat.opacity = Math.max(0, Math.min(1, val / 1.5));
+      updateSliderValue(sunWireSlider, sunWireValue);
+    });
+    // Set initial opacity
+    sunWireMat.opacity = Math.max(0, Math.min(1, parseFloat(sunWireSlider.value) / 1.5));
+    animSpeedSlider.addEventListener('input', () => {
+      updateSliderValue(animSpeedSlider, animSpeedValue);
+    });
+    planetBrightSlider.addEventListener('input', () => {
+      planetObjects.forEach((mesh, idx) => {
+        mesh.material.emissiveIntensity = parseFloat(planetBrightSlider.value);
+      });
+      updateSliderValue(planetBrightSlider, planetBrightValue);
+    });
+    showOrbitsBox.addEventListener('change', () => {
+      orbitLines.forEach(line => line.visible = showOrbitsBox.checked);
+    });
+    showLabelsBox.addEventListener('change', () => {
+      planetLabels.forEach(label => label.visible = showLabelsBox.checked);
+    });
+    showGravityBox.addEventListener('change', () => {
+      gravitySpheres.forEach(sphere => sphere.visible = showGravityBox.checked);
+    });
+    showEarthMarsBox.addEventListener('change', () => {
+      earthMarsLine.visible = showEarthMarsBox.checked;
+    });
+
+    // Initial UI state
+    updateSliderValue(sunWireSlider, sunWireValue);
+    updateSliderValue(animSpeedSlider, animSpeedValue);
+    updateSliderValue(planetBrightSlider, planetBrightValue);
+    orbitLines.forEach(line => line.visible = showOrbitsBox.checked);
+    planetLabels.forEach(label => label.visible = showLabelsBox.checked);
+    gravitySpheres.forEach(sphere => sphere.visible = showGravityBox.checked);
+    earthMarsLine.visible = showEarthMarsBox.checked;
+
+    // --- Animation Loop ---
+    const clock = new THREE.Clock();
+    let simTime = 0; // in days
+
+    // Reusable vectors
+    const v1 = new THREE.Vector3();
+    const v2 = new THREE.Vector3();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = clock.getDelta();
+      const animSpeed = parseFloat(animSpeedSlider.value);
+      simTime += dt * 30 * animSpeed; // 1 real second = 30 sim days * speed
+
+      // Update planet positions, gravity spheres, labels
+      planetData.forEach((planet, idx) => {
+        const pos = getPlanetPosition(planet, simTime);
+        planet.mesh.position.copy(pos);
+        planet.gravMesh.position.copy(pos);
+        planet.labelObj.position.copy(pos).add(new THREE.Vector3(0, planet.radius + 1.2, 0));
+      });
+
+      // Earth-Mars line
+      const earthPos = planetData[earthIdx].mesh.position;
+      const marsPos = planetData[marsIdx].mesh.position;
+      earthMarsLine.geometry.setFromPoints([earthPos, marsPos]);
+
+      // Hohmann transfer window: Mars should lead Earth by ~44° (+/-20°)
+      // Compute angle in orbital plane (ignore inclination for simplicity)
+      const sunPos = new THREE.Vector3(0, 0, 0);
+      v1.copy(earthPos).sub(sunPos).setY(0).normalize();
+      v2.copy(marsPos).sub(sunPos).setY(0).normalize();
+      let angle = Math.acos(THREE.MathUtils.clamp(v1.dot(v2), -1, 1));
+      // Cross product to determine sign
+      const cross = v1.clone().cross(v2).y;
+      if (cross < 0) angle = 2 * Math.PI - angle;
+      // Mars leads Earth if angle > 0
+      // Hohmann optimal: ~44° (0.77 rad), window: 24°-64°
+      if (angle > 0.42 && angle < 1.12) {
+        earthMarsLine.material.color.set(0x00ff44);
+      } else {
+        earthMarsLine.material.color.set(0xff2222);
+      }
+
+      controls.update();
+      composer.render();
+      labelRenderer.render(scene, camera);
+    }
+    animate();
+
+    // --- Responsive Resize ---
+    function onWindowResize() {
+      const w = window.innerWidth, h = window.innerHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      composer.setSize(w, h);
+      labelRenderer.setSize(w, h);
+    }
+    window.addEventListener('resize', onWindowResize);
+
+    // --- End ---
+  </script>
+</body>
+</html>
