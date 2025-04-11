@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Spacetime Curvature Visualization (Three.js)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #101018;
+      }
+      body {
+        width: 100vw;
+        height: 100vh;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      // === Configuration Constants ===
+      const PLANE_SIZE = 40;
+      const PLANE_SEGMENTS = 70;
+      const STAR_RADIUS = 2.5;
+      const PLANET_RADIUS = 0.7;
+      const ORBIT_RADIUS = 10;
+      const ORBIT_SPEED = 0.6; // radians/sec
+      const DEFORMATION_STRENGTH_STAR = 7.5;
+      const DEFORMATION_STRENGTH_PLANET = 2.5;
+      const DEFORMATION_EXPONENT = 1.5; // falloff
+      const STAR_COLOR = 0xffe066;
+      const PLANET_COLOR = 0x3399ff;
+      const GRID_COLOR = 0x33ff33;
+
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+      // === Scene Setup ===
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x101018);
+
+      // Camera
+      const camera = new THREE.PerspectiveCamera(
+        60,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        100
+      );
+      camera.position.set(0, 18, 28);
+
+      // Renderer
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      document.body.appendChild(renderer.domElement);
+
+      // Controls
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.minDistance = 10;
+      controls.maxDistance = 60;
+      controls.target.set(0, 0, 0);
+
+      // === Lighting ===
+      scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+      const pointLight = new THREE.PointLight(STAR_COLOR, 1.2, 100);
+      pointLight.position.set(0, 4, 0);
+      scene.add(pointLight);
+
+      // === Spacetime Grid (Plane) ===
+      const planeGeometry = new THREE.PlaneGeometry(
+        PLANE_SIZE,
+        PLANE_SIZE,
+        PLANE_SEGMENTS,
+        PLANE_SEGMENTS
+      );
+      // Store original positions for deformation reference
+      const originalPositions = planeGeometry.attributes.position.array.slice();
+
+      const planeMaterial = new THREE.MeshBasicMaterial({
+        color: GRID_COLOR,
+        wireframe: true,
+      });
+      const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+      plane.rotation.x = -Math.PI / 2;
+      scene.add(plane);
+
+      // === Central Mass (Star) ===
+      const starGeometry = new THREE.SphereGeometry(STAR_RADIUS, 48, 32);
+      const starMaterial = new THREE.MeshPhysicalMaterial({
+        color: STAR_COLOR,
+        emissive: STAR_COLOR,
+        emissiveIntensity: 0.7,
+        roughness: 0.3,
+        metalness: 0.1,
+        transmission: 0.1,
+        clearcoat: 0.2,
+      });
+      const star = new THREE.Mesh(starGeometry, starMaterial);
+      star.position.set(0, STAR_RADIUS, 0);
+      scene.add(star);
+
+      // === Orbiting Mass (Planet) ===
+      const planetGeometry = new THREE.SphereGeometry(PLANET_RADIUS, 32, 24);
+      const planetMaterial = new THREE.MeshPhysicalMaterial({
+        color: PLANET_COLOR,
+        emissive: PLANET_COLOR,
+        emissiveIntensity: 0.25,
+        roughness: 0.5,
+        metalness: 0.2,
+        transmission: 0.05,
+      });
+      const planet = new THREE.Mesh(planetGeometry, planetMaterial);
+      scene.add(planet);
+
+      // === Animation Loop ===
+      let clock = new THREE.Clock();
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        // --- Animate planet orbit ---
+        const t = clock.getElapsedTime();
+        const angle = t * ORBIT_SPEED;
+        const px = ORBIT_RADIUS * Math.cos(angle);
+        const pz = ORBIT_RADIUS * Math.sin(angle);
+        planet.position.set(px, PLANET_RADIUS, pz);
+
+        // --- Deform grid based on both masses ---
+        const pos = planeGeometry.attributes.position;
+        // --- Deformation parameters (stronger, more visible wells) ---
+        const MIN_DIST_STAR = 0.25; // allow closer approach
+        const MIN_DIST_PLANET = 0.15;
+        const MAX_DEFORM_STAR = -STAR_RADIUS * 2.2;
+        const MAX_DEFORM_PLANET = -PLANET_RADIUS * 2.5;
+        const DEFORMATION_EXPONENT_VISIBLE = 1.15; // shallower falloff for broader wells
+        const DEFORMATION_STRENGTH_STAR_VISIBLE = 18.0;
+        const DEFORMATION_STRENGTH_PLANET_VISIBLE = 6.5;
+
+        // --- Use world coordinates for correct radial deformation ---
+        const vertex = new THREE.Vector3();
+        const world = new THREE.Vector3();
+
+        // Project sphere centers to grid (y=0)
+        const starGridPos = new THREE.Vector3(star.position.x, 0, star.position.z);
+        const planetGridPos = new THREE.Vector3(planet.position.x, 0, planet.position.z);
+
+        // Deformation parameters (star much stronger than planet)
+        const STAR_DEFORM_STRENGTH = 60.0;
+        const PLANET_DEFORM_STRENGTH = 8.0;
+        const STAR_MIN_DIST = STAR_RADIUS * 0.95;
+        const PLANET_MIN_DIST = PLANET_RADIUS * 0.95;
+        const STAR_MAX_DEFORM = -STAR_RADIUS * 2.5;
+        const PLANET_MAX_DEFORM = -PLANET_RADIUS * 2.2;
+        const DEFORM_EXPONENT = 1.25;
+
+        // Optional: smoothstep for more realistic well edge
+        function smoothstep(edge0, edge1, x) {
+          const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+          return t * t * (3 - 2 * t);
+        }
+
+        for (let i = 0; i < pos.count; i++) {
+          // Get original (x, y, z) for this vertex (local space)
+          const ox = originalPositions[i * 3 + 0];
+          const oy = originalPositions[i * 3 + 1];
+          const oz = originalPositions[i * 3 + 2];
+
+          // Transform to world space (after mesh rotation)
+          vertex.set(ox, oy, oz);
+          plane.localToWorld(world.copy(vertex));
+
+          // Compute 2D distance from grid vertex to projected sphere centers
+          let dist_star = Math.sqrt(
+            Math.pow(world.x - starGridPos.x, 2) +
+            Math.pow(world.z - starGridPos.z, 2)
+          );
+          let dist_planet = Math.sqrt(
+            Math.pow(world.x - planetGridPos.x, 2) +
+            Math.pow(world.z - planetGridPos.z, 2)
+          );
+
+          // Clamp minimum distance to avoid singularity
+          dist_star = Math.max(dist_star, STAR_MIN_DIST);
+          dist_planet = Math.max(dist_planet, PLANET_MIN_DIST);
+
+          // Deformation: inverse power law, additive, clamped
+          let deform_star =
+            -STAR_DEFORM_STRENGTH /
+            Math.pow(dist_star, DEFORM_EXPONENT);
+          deform_star = Math.max(deform_star, STAR_MAX_DEFORM);
+
+          let deform_planet =
+            -PLANET_DEFORM_STRENGTH /
+            Math.pow(dist_planet, DEFORM_EXPONENT);
+          deform_planet = Math.max(deform_planet, PLANET_MAX_DEFORM);
+
+          // Optionally, fade out deformation at the edge of the sphere's "footprint"
+          const starFade = 1.0 - smoothstep(STAR_RADIUS * 1.1, STAR_RADIUS * 2.5, dist_star);
+          const planetFade = 1.0 - smoothstep(PLANET_RADIUS * 1.1, PLANET_RADIUS * 2.5, dist_planet);
+
+          // Combine
+          const y =
+            oy +
+            deform_star * starFade +
+            deform_planet * planetFade;
+
+          pos.setY(i, y);
+        }
+        pos.needsUpdate = true;
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      animate();
+
+      // === Responsive Resize ===
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    </script>
+  </body>
+</html>
